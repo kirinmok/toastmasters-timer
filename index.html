@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Toastmasters Timer - CYTC #576</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    background: #111; color: #ddd;
+    min-height: 100vh; padding-bottom: 60px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ===== Header ===== */
+  header {
+    background: #1a1a1a; padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 16px; font-weight: 700; color: #fff; }
+  header .sub { font-size: 11px; color: #777; }
+  .container { max-width: 900px; margin: 0 auto; padding: 12px; }
+
+  /* ===== Tabs ===== */
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tab {
+    flex: 1; padding: 10px 8px; text-align: center; border-radius: 8px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    background: #222; color: #888; border: 1px solid #333;
+    transition: all 0.2s;
+  }
+  .tab.active { background: #444; color: #fff; border-color: #555; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ===== Timer Display ===== */
+  .timer-section {
+    text-align: center; padding: 28px 16px;
+    border-radius: 16px; margin-bottom: 16px;
+    transition: background 0.5s, box-shadow 0.5s;
+    background: #1a1a1a; position: relative;
+  }
+  /* Signal states — ONLY these use color */
+  .timer-section.signal-green { background: linear-gradient(135deg, #0a3d2a, #0d4a33); box-shadow: 0 0 60px rgba(34,197,94,0.35); }
+  .timer-section.signal-yellow { background: linear-gradient(135deg, #4a3510, #5a4012); box-shadow: 0 0 60px rgba(234,179,8,0.35); }
+  .timer-section.signal-red { background: linear-gradient(135deg, #4a1010, #5a1515); box-shadow: 0 0 60px rgba(239,68,68,0.4); }
+  .timer-section.signal-red.flash { animation: redFlash 0.5s infinite; }
+  @keyframes redFlash {
+    0%,100% { box-shadow: 0 0 60px rgba(239,68,68,0.4); }
+    50% { box-shadow: 0 0 120px rgba(239,68,68,0.8); background: #6b1a1a; }
+  }
+
+  .current-speaker { font-size: 14px; color: #999; margin-bottom: 2px; }
+  .current-speaker strong { color: #fff; font-size: 20px; }
+  .current-type { font-size: 12px; color: #666; margin-bottom: 16px; }
+
+  /* Traffic lights — the STAR of the show */
+  .traffic-lights { display: flex; justify-content: center; gap: 20px; margin-bottom: 14px; }
+  .light {
+    width: 52px; height: 52px; border-radius: 50%;
+    border: 3px solid #333; opacity: 0.12;
+    transition: opacity 0.3s, box-shadow 0.3s, transform 0.3s;
+  }
+  .light.on { opacity: 1; transform: scale(1.2); }
+  .light-green { background: #22c55e; }
+  .light-green.on { box-shadow: 0 0 30px #22c55e, 0 0 60px rgba(34,197,94,0.3); border-color: #22c55e; }
+  .light-yellow { background: #eab308; }
+  .light-yellow.on { box-shadow: 0 0 30px #eab308, 0 0 60px rgba(234,179,8,0.3); border-color: #eab308; }
+  .light-red { background: #ef4444; }
+  .light-red.on { box-shadow: 0 0 30px #ef4444, 0 0 60px rgba(239,68,68,0.3); border-color: #ef4444; }
+
+  .timer-display {
+    font-size: 88px; font-weight: 800; font-variant-numeric: tabular-nums;
+    letter-spacing: 2px; line-height: 1; color: #fff; margin-bottom: 8px;
+  }
+  .timer-hint {
+    font-size: 17px; font-weight: 700; min-height: 26px; transition: color 0.3s;
+    color: #666;
+  }
+  /* Hint colors match the signal */
+  .timer-hint.hint-green { color: #4ade80; }
+  .timer-hint.hint-yellow { color: #facc15; }
+  .timer-hint.hint-red { color: #f87171; }
+  .timer-hint.hint-dq { color: #ef4444; font-size: 22px; }
+
+  /* Buttons — ALL neutral gray */
+  .btn-row { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
+  .btn {
+    padding: 14px 32px; border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700; cursor: pointer;
+    transition: transform 0.1s, background 0.15s;
+    min-width: 90px;
+  }
+  .btn:active { transform: scale(0.95); }
+  .btn:disabled { opacity: 0.2; cursor: not-allowed; }
+  .btn-start { background: #555; color: #fff; }
+  .btn-start:not(:disabled):hover { background: #666; }
+  .btn-stop { background: #444; color: #ccc; }
+  .btn-stop:not(:disabled):hover { background: #555; }
+  .btn-next { background: #444; color: #ccc; }
+  .btn-next:not(:disabled):hover { background: #555; }
+
+  /* ===== Speaker Table ===== */
+  .stitle { font-size: 13px; font-weight: 700; color: #999; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #222; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  th { background: #1a1a1a; padding: 8px 6px; font-size: 11px; color: #666; text-align: left; font-weight: 600; border-bottom: 1px solid #333; }
+  td { padding: 6px; font-size: 12px; border-bottom: 1px solid #1e1e1e; vertical-align: middle; }
+  tr.active-row { background: rgba(255,255,255,0.06); }
+  tr.done-row td { opacity: 0.45; }
+  input.name-input {
+    background: #181818; border: 1px solid #333; border-radius: 5px;
+    color: #eee; padding: 6px; font-size: 13px; width: 100%;
+  }
+  input.name-input:focus { outline: none; border-color: #666; }
+  select.type-sel {
+    background: #181818; border: 1px solid #333; border-radius: 5px;
+    color: #eee; padding: 5px; font-size: 11px; width: 100%;
+  }
+  /* Status badges — only DQ uses red */
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+  .badge-ok { background: rgba(34,197,94,0.15); color: #86efac; }
+  .badge-dq { background: rgba(239,68,68,0.15); color: #fca5a5; }
+  .badge-wait { background: rgba(255,255,255,0.05); color: #555; }
+
+  /* ===== Script Section ===== */
+  .script-box {
+    background: #1a1a1a; border-radius: 12px; padding: 16px; margin-bottom: 16px;
+    border-left: 4px solid #555;
+  }
+  .script-box h3 { font-size: 14px; color: #bbb; margin-bottom: 8px; }
+  .script-box p { font-size: 13px; line-height: 1.85; color: #aaa; margin-bottom: 8px; }
+  .script-box .highlight { color: #fff; font-weight: 700; }
+  /* Signal color text in script */
+  .script-box .green-text { color: #4ade80; font-weight: 700; }
+  .script-box .yellow-text { color: #facc15; font-weight: 700; }
+  .script-box .red-text { color: #f87171; font-weight: 700; }
+
+  /* ===== Report ===== */
+  .report-box { background: #1a1a1a; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .report-line { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #222; font-size: 13px; }
+  .report-line:last-child { border-bottom: none; }
+  .report-final { margin-top: 10px; padding-top: 10px; border-top: 1px solid #333; font-size: 15px; font-weight: 700; }
+  .report-final.ok { color: #22c55e; }
+  .report-final.bad { color: #f87171; }
+
+  .full-btn {
+    width: 100%; padding: 13px; border-radius: 10px; font-size: 14px;
+    font-weight: 700; cursor: pointer; border: none; margin-bottom: 10px;
+  }
+  .btn-primary { background: #444; color: #fff; }
+  .btn-primary:hover { background: #555; }
+  .btn-danger { background: #3a1515; color: #e88; }
+  .btn-danger:hover { background: #4a1a1a; }
+
+
+  /* ===== Mobile Portrait Optimization ===== */
+  @media (max-width: 600px) {
+    body { padding-bottom: 20px; }
+    .container { padding: 8px; }
+
+    /* Tabs — bigger touch targets */
+    .tab { padding: 12px 6px; font-size: 15px; border-radius: 10px; }
+
+    /* Timer display — huge and clear */
+    .timer-section { padding: 20px 12px; border-radius: 14px; }
+    .current-speaker { font-size: 16px; }
+    .current-speaker strong { font-size: 22px; }
+    .current-type { font-size: 14px; margin-bottom: 14px; }
+    .timer-display { font-size: 80px; }
+    .timer-hint { font-size: 19px; }
+    .timer-hint.hint-dq { font-size: 22px; }
+
+    /* Traffic lights — big and visible */
+    .traffic-lights { gap: 24px; margin-bottom: 16px; }
+    .light { width: 56px; height: 56px; border-width: 3px; }
+
+    /* Buttons — full width, tall, easy to tap */
+    .btn-row { flex-direction: column; gap: 8px; margin-top: 14px; }
+    .btn {
+      width: 100%; padding: 16px; font-size: 18px;
+      border-radius: 14px; min-height: 54px;
+    }
+
+    /* Table — readable on phone */
+    table { font-size: 13px; }
+    th { padding: 8px 4px; font-size: 11px; }
+    td { padding: 8px 4px; font-size: 13px; }
+    input.name-input { font-size: 14px; padding: 8px 6px; }
+    select.type-sel { font-size: 12px; padding: 6px 4px; }
+    .badge { font-size: 11px; padding: 3px 8px; }
+
+    /* Script — bigger text for reading on stage */
+    .script-box { padding: 14px; }
+    .script-box h3 { font-size: 16px; }
+    .script-box p { font-size: 15px; line-height: 2; }
+    #timerName { font-size: 17px !important; padding: 10px !important; }
+
+    /* Report */
+    .report-line { font-size: 14px; padding: 8px 0; }
+    .report-final { font-size: 17px; }
+    .full-btn { padding: 16px; font-size: 16px; border-radius: 14px; }
+
+    /* Stitle */
+    .stitle { font-size: 14px; }
+  }
+
+  /* Extra small phones (iPhone SE etc) */
+  @media (max-width: 380px) {
+    .timer-display { font-size: 64px; }
+    .light { width: 48px; height: 48px; }
+    .btn { font-size: 16px; padding: 14px; }
+    .script-box p { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>CYTC Timer #576</h1>
+    <div class="sub">Chia-Yi Toastmasters | 2026/03/04 | <span id="headerTimerName">Timer: Kirin Mok</span></div>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Tabs (3 only: Timer / Script / Report) -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('script')">Script</div>
+    <div class="tab" onclick="switchTab('timer')">Timer</div>
+    <div class="tab" onclick="switchTab('report')">Report</div>
+  </div>
+
+  <!-- ==================== TAB 1: TIMER ==================== -->
+  <div class="tab-content" id="tab-timer">
+    <div class="timer-section" id="timerSection">
+      <div class="current-speaker" id="curSpeaker">Tap a speaker below to begin</div>
+      <div class="current-type" id="curType"></div>
+      <div class="traffic-lights">
+        <div class="light light-green" id="lG"></div>
+        <div class="light light-yellow" id="lY"></div>
+        <div class="light light-red" id="lR"></div>
+      </div>
+      <div class="timer-display" id="timerDisp">0:00</div>
+      <div class="timer-hint" id="timerHint"></div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="btnStart" onclick="startTimer()">START</button>
+        <button class="btn btn-stop" id="btnStop" onclick="stopTimer()" disabled>STOP</button>
+        <button class="btn btn-next" id="btnNext" onclick="nextSpeaker()" disabled>NEXT</button>
+      </div>
+    </div>
+
+    <div class="stitle">Tonight's Agenda (tap row to select)</div>
+    <table>
+      <thead><tr>
+        <th>#</th><th>Name</th><th>Type</th>
+        <th style="color:#4ade80">G</th>
+        <th style="color:#facc15">Y</th>
+        <th style="color:#f87171">R</th>
+        <th>Time</th><th>Status</th>
+      </tr></thead>
+      <tbody id="tBody"></tbody>
+    </table>
+
+    <!-- removed quick-add and add-speaker buttons per user request -->
+  </div>
+
+  <!-- ==================== TAB 2: SCRIPT ==================== -->
+  <div class="tab-content active" id="tab-script">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <span style="font-size:13px;color:#888;white-space:nowrap;">Timer:</span>
+      <input id="timerName" class="name-input" value="Kirin Mok" style="font-size:15px;font-weight:700;padding:8px 10px;" oninput="updateTimerName()">
+    </div>
+    <div class="script-box">
+      <h3>Opening Script (19:02)</h3>
+      <p>Good evening President, fellow toastmasters and respected guests. My name is <span class="highlight" id="scriptName">Kirin Mok</span>. I am pleased to be the timer of tonight's meeting. To conduct the meeting smoothly and on schedule, I will monitor the time and remind you during prepared speeches, table topics and individual evaluations.</p>
+      <p>Let me explain the three timing signals.</p>
+      <p><span class="green-text">Green Card:</span> When you see the Green Card, it means you have reached the <span class="highlight">minimum time requirement</span>.</p>
+      <p><span class="yellow-text">Yellow Card:</span> When you see the Yellow Card:<br>
+      - For <span class="highlight">Manual speech speakers</span>, you have <span class="highlight">1 minute left</span>.<br>
+      - For <span class="highlight">Table Topic speakers</span> and <span class="highlight">evaluators</span>, you have <span class="highlight">30 seconds left</span>.</p>
+      <p><span class="red-text">Red Card:</span> When you see the Red Card, it means <span class="highlight">your time is up</span>. You must finish within <span class="highlight">30 seconds</span>.</p>
+      <p>If you speak overtime, you will be disqualified and are <span class="red-text">not eligible</span> for awards.</p>
+      <p>I will report the time of each participant at the end of the meeting and let you know if your presentation was within the allotted time frame.</p>
+      <p>Back to you, Toastmaster.</p>
+    </div>
+
+    <div class="script-box" style="border-left-color: #888;">
+      <h3>Closing Report (~20:32, 2 min)</h3>
+      <p>Thank you, General Evaluator. Here is the timer's report for tonight's meeting.</p>
+      <p>For the <span class="highlight">Prepared Speeches</span>:</p>
+      <p id="scriptManual" style="padding-left:12px;color:#888">(will auto-fill after timing)</p>
+      <p>For the <span class="highlight">Table Topics</span>:</p>
+      <p id="scriptTT" style="padding-left:12px;color:#888">(will auto-fill after timing)</p>
+      <p>For the <span class="highlight">Individual Evaluations</span>:</p>
+      <p id="scriptEval" style="padding-left:12px;color:#888">(will auto-fill after timing)</p>
+      <p id="scriptEligible" style="font-weight:700;color:#22c55e">Everyone is eligible for voting.</p>
+      <p>Back to you, General Evaluator.</p>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 3: REPORT ==================== -->
+  <div class="tab-content" id="tab-report">
+    <div class="stitle">Timer Report</div>
+    <div class="report-box" id="reportBox">
+      <div id="reportContent"><p style="color:#555;font-size:12px">Complete all timing, then tap "Generate Report" below.</p></div>
+      <div class="report-final" id="reportFinal"></div>
+    </div>
+    <button class="full-btn btn-primary" onclick="generateReport()">Generate Report</button>
+    <button class="full-btn btn-primary" onclick="copyReport()" style="margin-top:4px;background:#333">Copy Report Text</button>
+    <button class="full-btn btn-danger" onclick="resetAll()" style="margin-top:8px">Reset All</button>
+  </div>
+
+</div>
+
+<script>
+// ===== Speech Type Presets =====
+var TYPES = {
+  'manual_5_7':   { label: 'Prepared (5-7)',  green: 300, yellow: 360, red: 420, dq: 450, cat: 'manual' },
+  'manual_10_15': { label: 'Prepared (10-15)', green: 600, yellow: 840, red: 900, dq: 930, cat: 'manual' },
+  'table_topics': { label: 'Table Topics (1-2)', green: 60,  yellow: 90,  red: 120, dq: 150, cat: 'tt' },
+  'evaluation':   { label: 'Evaluation (2-3)',  green: 120, yellow: 150, red: 180, dq: 210, cat: 'eval' },
+  'ge_report':    { label: 'GE Report (3-5)',   green: 180, yellow: 240, red: 300, dq: 330, cat: 'other' },
+  'other_1_2':    { label: 'Other (1-2)',       green: 60,  yellow: 90,  red: 120, dq: 150, cat: 'other' },
+  'other_2_3':    { label: 'Other (2-3)',       green: 120, yellow: 150, red: 180, dq: 210, cat: 'other' }
+};
+
+// ===== State =====
+var speakers = [];
+var curIdx = -1;
+var interval = null;
+var elapsed = 0;
+var running = false;
+
+// ===== Audio (beep alerts) =====
+var audioCtx = null;
+function beep(freq, dur) {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    o.frequency.value = freq; g.gain.value = 0.3;
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch(e){}
+}
+
+// ===== Init tonight's speakers =====
+function initSpeakers() {
+  speakers = [
+    { name: 'Joanna Lu',  type: 'manual_5_7',   title: 'The Wood Grain of My Life', recorded: null, status: 'pending' },
+    { name: 'Jason Chen',  type: 'manual_10_15',  title: 'TM Educational Program',    recorded: null, status: 'pending' },
+    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
+    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
+    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
+    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
+    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
+    { name: 'Jason Lai',   type: 'evaluation',    title: 'Eval for Joanna',            recorded: null, status: 'pending' },
+    { name: 'Ross Tsai',   type: 'evaluation',    title: 'Eval for Jason',             recorded: null, status: 'pending' }
+  ];
+  renderTable();
+}
+
+function fmt(s) { return Math.floor(s/60) + ':' + (s%60<10?'0':'') + s%60; }
+function getCfg(i) { return TYPES[speakers[i].type] || TYPES['table_topics']; }
+
+// ===== Table =====
+function renderTable() {
+  var b = document.getElementById('tBody');
+  var h = '';
+  for (var i = 0; i < speakers.length; i++) {
+    var s = speakers[i], c = getCfg(i);
+    var cls = (i === curIdx && running) ? 'active-row' : (s.status !== 'pending' ? 'done-row' : '');
+    var badge = s.status === 'eligible' ? '<span class="badge badge-ok">OK</span>'
+              : s.status === 'over' ? '<span class="badge badge-dq">DQ</span>'
+              : '<span class="badge badge-wait">--</span>';
+    var opts = '';
+    for (var k in TYPES) opts += '<option value="'+k+'"'+(k===s.type?' selected':'')+'>'+TYPES[k].label+'</option>';
+
+    h += '<tr class="'+cls+'" data-i="'+i+'" onclick="clickRow(event,'+i+')">'
+      + '<td style="color:#666;font-weight:600">'+(i+1)+'</td>'
+      + '<td><input class="name-input" value="'+(s.name||'')+'" onchange="speakers['+i+'].name=this.value" onclick="event.stopPropagation()" placeholder="Name"></td>'
+      + '<td><select class="type-sel" onchange="speakers['+i+'].type=this.value;renderTable()" onclick="event.stopPropagation()">'+opts+'</select></td>'
+      + '<td style="color:#4ade80">'+fmt(c.green)+'</td>'
+      + '<td style="color:#facc15">'+fmt(c.yellow)+'</td>'
+      + '<td style="color:#f87171">'+fmt(c.red)+'</td>'
+      + '<td style="font-weight:700;color:#ccc">'+(s.recorded!==null?fmt(s.recorded):'--')+'</td>'
+      + '<td>'+badge+'</td></tr>';
+  }
+  b.innerHTML = h;
+}
+
+function clickRow(e, i) {
+  if (e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
+  if (running) return;
+  selectSpeaker(i);
+}
+
+
+function selectSpeaker(i) {
+  curIdx = i; elapsed = 0;
+  var s = speakers[i], c = getCfg(i);
+  document.getElementById('curSpeaker').innerHTML = '<strong>' + (s.name || 'Speaker #'+(i+1)) + '</strong>';
+  document.getElementById('curType').textContent = (s.title ? s.title + ' | ' : '') + TYPES[s.type].label;
+  document.getElementById('timerDisp').textContent = '0:00';
+  document.getElementById('timerHint').textContent = 'Ready — tap START';
+  document.getElementById('timerHint').className = 'timer-hint';
+  document.getElementById('timerSection').className = 'timer-section';
+  resetLights();
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnNext').disabled = true;
+  renderTable();
+}
+
+function resetLights() {
+  document.getElementById('lG').classList.remove('on');
+  document.getElementById('lY').classList.remove('on');
+  document.getElementById('lR').classList.remove('on');
+}
+
+// ===== Timer Core =====
+function startTimer() {
+  if (curIdx < 0) {
+    for (var i = 0; i < speakers.length; i++) {
+      if (speakers[i].status === 'pending') { selectSpeaker(i); break; }
+    }
+    if (curIdx < 0) return;
+  }
+  running = true; elapsed = 0;
+  resetLights();
+  document.getElementById('timerSection').className = 'timer-section';
+  document.getElementById('timerHint').textContent = 'Timing...';
+  document.getElementById('timerHint').className = 'timer-hint';
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  document.getElementById('btnNext').disabled = true;
+  renderTable();
+
+  // Ensure AudioContext is ready (needs user gesture)
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){}
+  }
+
+  var fg = false, fy = false, fr = false;
+  interval = setInterval(function() {
+    elapsed++;
+    document.getElementById('timerDisp').textContent = fmt(elapsed);
+    var c = getCfg(curIdx);
+
+    if (!fg && elapsed >= c.green && c.green > 0) {
+      fg = true;
+      document.getElementById('lG').classList.add('on');
+      document.getElementById('timerSection').className = 'timer-section signal-green';
+      document.getElementById('timerHint').textContent = 'GREEN — Minimum reached';
+      document.getElementById('timerHint').className = 'timer-hint hint-green';
+      beep(880, 0.15);
+    }
+    if (!fy && elapsed >= c.yellow && c.yellow > 0) {
+      fy = true;
+      document.getElementById('lY').classList.add('on');
+      document.getElementById('timerSection').className = 'timer-section signal-yellow';
+      document.getElementById('timerHint').textContent = 'YELLOW — Wrap up soon';
+      document.getElementById('timerHint').className = 'timer-hint hint-yellow';
+      beep(660, 0.15); setTimeout(function(){ beep(660, 0.15); }, 200);
+    }
+    if (!fr && elapsed >= c.red && c.red > 0) {
+      fr = true;
+      document.getElementById('lR').classList.add('on');
+      document.getElementById('timerSection').className = 'timer-section signal-red';
+      document.getElementById('timerHint').textContent = 'RED — Time is up! Finish now';
+      document.getElementById('timerHint').className = 'timer-hint hint-red';
+      beep(440, 0.2); setTimeout(function(){ beep(440, 0.2); }, 250); setTimeout(function(){ beep(440, 0.3); }, 500);
+    }
+    if (elapsed >= c.dq && c.dq > 0) {
+      document.getElementById('timerSection').className = 'timer-section signal-red flash';
+      document.getElementById('timerHint').textContent = 'DISQUALIFIED — Over time limit';
+      document.getElementById('timerHint').className = 'timer-hint hint-dq';
+    }
+  }, 1000);
+}
+
+function stopTimer() {
+  if (!running) return;
+  clearInterval(interval);
+  running = false;
+
+  var c = getCfg(curIdx);
+  speakers[curIdx].recorded = elapsed;
+  speakers[curIdx].status = (elapsed >= c.dq && c.dq > 0) ? 'over' : 'eligible';
+
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnNext').disabled = false;
+
+  var ok = speakers[curIdx].status === 'eligible';
+  document.getElementById('timerHint').textContent = fmt(elapsed) + (ok ? ' — Eligible' : ' — Disqualified');
+  document.getElementById('timerHint').className = 'timer-hint' + (ok ? '' : ' hint-dq');
+  if (ok) document.getElementById('timerSection').className = 'timer-section';
+
+  renderTable();
+  updateScriptReport();
+}
+
+function nextSpeaker() {
+  for (var i = curIdx + 1; i < speakers.length; i++) {
+    if (speakers[i].status === 'pending') { selectSpeaker(i); return; }
+  }
+  curIdx = -1;
+  document.getElementById('curSpeaker').textContent = 'All done! Go to Report tab.';
+  document.getElementById('curType').textContent = '';
+  document.getElementById('timerDisp').textContent = '0:00';
+  document.getElementById('timerHint').textContent = '';
+  document.getElementById('timerSection').className = 'timer-section';
+  resetLights();
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnNext').disabled = true;
+  renderTable();
+}
+
+// ===== Auto-fill Closing Script =====
+function updateScriptReport() {
+  var manual = [], tt = [], ev = [];
+  for (var i = 0; i < speakers.length; i++) {
+    var s = speakers[i];
+    if (s.recorded === null) continue;
+    var c = getCfg(i);
+    var name = s.name || 'Speaker #'+(i+1);
+    var line = name + (s.title ? ' — "'+s.title+'"' : '') + ' — ' + fmt(s.recorded);
+    if (s.status === 'over') line += ' (DQ)';
+    if (c.cat === 'manual') manual.push(line);
+    else if (c.cat === 'tt') tt.push(line);
+    else if (c.cat === 'eval') ev.push(line);
+  }
+  document.getElementById('scriptManual').innerHTML = manual.length ? manual.join('<br>') : '(none yet)';
+  document.getElementById('scriptTT').innerHTML = tt.length ? tt.join('<br>') : '(none yet)';
+  document.getElementById('scriptEval').innerHTML = ev.length ? ev.join('<br>') : '(none yet)';
+
+  var dqList = speakers.filter(function(s){ return s.status === 'over'; });
+  var el = document.getElementById('scriptEligible');
+  if (dqList.length === 0) {
+    el.textContent = 'Everyone is eligible for voting.';
+    el.style.color = '#22c55e';
+  } else {
+    var names = dqList.map(function(s){ return s.name || '(unnamed)'; }).join(', ');
+    el.textContent = names + ' exceeded the time limit and is/are not eligible for the best awards.';
+    el.style.color = '#f87171';
+  }
+}
+
+// ===== Report =====
+function generateReport() {
+  switchTab('report');
+  var el = document.getElementById('reportContent');
+  var h = '';
+  var dqNames = [];
+  for (var i = 0; i < speakers.length; i++) {
+    var s = speakers[i];
+    if (!s.name && s.recorded === null) continue;
+    var name = s.name || 'Speaker #'+(i+1);
+    var time = s.recorded !== null ? fmt(s.recorded) : '--';
+    var badge = s.status === 'eligible' ? '<span class="badge badge-ok">Eligible</span>'
+              : s.status === 'over' ? '<span class="badge badge-dq">DQ</span>'
+              : '<span class="badge badge-wait">Not timed</span>';
+    if (s.status === 'over') dqNames.push(name);
+    h += '<div class="report-line"><span>'+name+(s.title?' — '+s.title:'')+'</span><span>'+time+' '+badge+'</span></div>';
+  }
+  el.innerHTML = h || '<p style="color:#555">No speakers timed yet.</p>';
+
+  var fin = document.getElementById('reportFinal');
+  if (dqNames.length === 0) {
+    fin.className = 'report-final ok';
+    fin.textContent = 'Everyone is eligible for voting.';
+  } else {
+    fin.className = 'report-final bad';
+    fin.textContent = 'Disqualified: ' + dqNames.join(', ');
+  }
+}
+
+function copyReport() {
+  var lines = ['Timer Report - CYTC #576 (2026/03/04)', ''];
+  for (var i = 0; i < speakers.length; i++) {
+    var s = speakers[i];
+    if (!s.name && s.recorded === null) continue;
+    var name = s.name || 'Speaker #'+(i+1);
+    var time = s.recorded !== null ? fmt(s.recorded) : '--';
+    var status = s.status === 'eligible' ? 'Eligible' : s.status === 'over' ? 'DQ' : 'Not timed';
+    lines.push(name + (s.title ? ' — '+s.title : '') + ' | ' + time + ' | ' + status);
+  }
+  var dqList = speakers.filter(function(s){ return s.status === 'over'; });
+  lines.push('');
+  if (dqList.length === 0) lines.push('Everyone is eligible for voting.');
+  else lines.push('Disqualified: ' + dqList.map(function(s){ return s.name; }).join(', '));
+
+  var text = lines.join('\n');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function(){ alert('Report copied!'); });
+  } else {
+    // Fallback
+    var ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('Report copied!');
+  }
+}
+
+// ===== Tabs =====
+function switchTab(id) {
+  var tabs = document.querySelectorAll('.tab');
+  var contents = document.querySelectorAll('.tab-content');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+  for (var i = 0; i < contents.length; i++) contents[i].classList.remove('active');
+  document.getElementById('tab-' + id).classList.add('active');
+  var names = ['script','timer','report'];
+  for (var i = 0; i < names.length; i++) {
+    if (names[i] === id) tabs[i].classList.add('active');
+  }
+}
+
+function resetAll() {
+  if (!confirm('Reset all data? All recorded times will be cleared.')) return;
+  clearInterval(interval); running = false; curIdx = -1; elapsed = 0;
+  document.getElementById('timerDisp').textContent = '0:00';
+  document.getElementById('curSpeaker').textContent = 'Tap a speaker below to begin';
+  document.getElementById('curType').textContent = '';
+  document.getElementById('timerHint').textContent = '';
+  document.getElementById('timerSection').className = 'timer-section';
+  resetLights();
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnNext').disabled = true;
+  initSpeakers();
+}
+
+// ===== Timer Name =====
+function updateTimerName() {
+  var name = document.getElementById('timerName').value.trim() || 'Timer';
+  document.getElementById('scriptName').textContent = name;
+  document.getElementById('headerTimerName').textContent = 'Timer: ' + name;
+}
+
+// ===== Boot =====
+initSpeakers();
+</script>
+</body>
+</html>
