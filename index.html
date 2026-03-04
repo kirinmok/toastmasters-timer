@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Toastmasters Timer - CYTC #576</title>
+<title>Toastmasters Timer - CYTC</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -104,9 +104,10 @@
 
   /* ===== Speaker Table ===== */
   .stitle { font-size: 13px; font-weight: 700; color: #999; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #222; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-  th { background: #1a1a1a; padding: 8px 6px; font-size: 11px; color: #666; text-align: left; font-weight: 600; border-bottom: 1px solid #333; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; table-layout: auto; }
+  th { background: #1a1a1a; padding: 8px 6px; font-size: 11px; color: #666; text-align: left; font-weight: 600; border-bottom: 1px solid #333; white-space: nowrap; }
   td { padding: 6px; font-size: 12px; border-bottom: 1px solid #1e1e1e; vertical-align: middle; }
+  td:nth-child(3) { min-width: 90px; } /* Type column — don't truncate */
   tr.active-row { background: rgba(255,255,255,0.06); }
   tr.done-row td { opacity: 0.45; }
   input.name-input {
@@ -117,10 +118,12 @@
   select.type-sel {
     background: #181818; border: 1px solid #333; border-radius: 5px;
     color: #eee; padding: 5px; font-size: 11px; width: 100%;
+    white-space: nowrap; overflow: visible;
   }
   /* Status badges — only DQ uses red */
   .badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 700; }
   .badge-ok { background: rgba(34,197,94,0.15); color: #86efac; }
+  .badge-over { background: rgba(234,179,8,0.15); color: #fde68a; }
   .badge-dq { background: rgba(239,68,68,0.15); color: #fca5a5; }
   .badge-wait { background: rgba(255,255,255,0.05); color: #555; }
 
@@ -219,8 +222,12 @@
 
 <header>
   <div>
-    <h1>CYTC Timer #576</h1>
-    <div class="sub">Chia-Yi Toastmasters | 2026/03/04 | <span id="headerTimerName">Timer: Kirin Mok</span></div>
+    <h1>CYTC Timer #<input id="meetingNum" type="text" value="" placeholder="___" style="background:transparent;border:none;border-bottom:1px solid #555;color:#fff;font-size:16px;font-weight:700;width:50px;text-align:center;font-family:inherit;" oninput="updateMeetingNum()"></h1>
+    <div class="sub">Chia-Yi Toastmasters | <span id="meetingDate"></span> | <span id="headerTimerName">Timer: Kirin Mok</span></div>
+  </div>
+  <div style="text-align:right;font-size:10px;color:#555;line-height:1.3;">
+    <div style="color:#777;">Developed by</div>
+    <div style="color:#999;font-weight:600;">Kirin Mok</div>
   </div>
 </header>
 
@@ -349,15 +356,15 @@ function beep(freq, dur) {
 // ===== Init tonight's speakers =====
 function initSpeakers() {
   speakers = [
-    { name: 'Joanna Lu',  type: 'manual_5_7',   title: 'The Wood Grain of My Life', recorded: null, status: 'pending' },
-    { name: 'Jason Chen',  type: 'manual_10_15',  title: 'TM Educational Program',    recorded: null, status: 'pending' },
-    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
-    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
-    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
-    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
-    { name: '',            type: 'table_topics',  title: '',                           recorded: null, status: 'pending' },
-    { name: 'Jason Lai',   type: 'evaluation',    title: 'Eval for Joanna',            recorded: null, status: 'pending' },
-    { name: 'Ross Tsai',   type: 'evaluation',    title: 'Eval for Jason',             recorded: null, status: 'pending' }
+    { name: '', type: 'manual_5_7',   title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'manual_5_7',   title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'table_topics', title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'table_topics', title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'table_topics', title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'table_topics', title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'table_topics', title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'evaluation',   title: '', recorded: null, status: 'pending' },
+    { name: '', type: 'evaluation',   title: '', recorded: null, status: 'pending' }
   ];
   renderTable();
 }
@@ -373,7 +380,8 @@ function renderTable() {
     var s = speakers[i], c = getCfg(i);
     var cls = (i === curIdx && running) ? 'active-row' : (s.status !== 'pending' ? 'done-row' : '');
     var badge = s.status === 'eligible' ? '<span class="badge badge-ok">OK</span>'
-              : s.status === 'over' ? '<span class="badge badge-dq">DQ</span>'
+              : s.status === 'over' ? '<span class="badge badge-over">OVER</span>'
+              : s.status === 'dq' ? '<span class="badge badge-dq">DQ</span>'
               : '<span class="badge badge-wait">--</span>';
     var opts = '';
     for (var k in TYPES) opts += '<option value="'+k+'"'+(k===s.type?' selected':'')+'>'+TYPES[k].label+'</option>';
@@ -488,16 +496,25 @@ function stopTimer() {
 
   var c = getCfg(curIdx);
   speakers[curIdx].recorded = elapsed;
-  speakers[curIdx].status = (elapsed >= c.dq && c.dq > 0) ? 'over' : 'eligible';
+  // 3 states: eligible (within red), over (past red but before DQ), dq (past DQ)
+  if (elapsed >= c.dq && c.dq > 0) {
+    speakers[curIdx].status = 'dq';
+  } else if (elapsed > c.red && c.red > 0) {
+    speakers[curIdx].status = 'over';
+  } else {
+    speakers[curIdx].status = 'eligible';
+  }
 
   document.getElementById('btnStart').disabled = true;
   document.getElementById('btnStop').disabled = true;
   document.getElementById('btnNext').disabled = false;
 
-  var ok = speakers[curIdx].status === 'eligible';
-  document.getElementById('timerHint').textContent = fmt(elapsed) + (ok ? ' — Eligible' : ' — Disqualified');
-  document.getElementById('timerHint').className = 'timer-hint' + (ok ? '' : ' hint-dq');
-  if (ok) document.getElementById('timerSection').className = 'timer-section';
+  var st = speakers[curIdx].status;
+  var hintText = fmt(elapsed) + (st === 'eligible' ? ' — Eligible' : st === 'over' ? ' — Over Time' : ' — Disqualified');
+  var hintClass = st === 'eligible' ? '' : ' hint-dq';
+  document.getElementById('timerHint').textContent = hintText;
+  document.getElementById('timerHint').className = 'timer-hint' + hintClass;
+  if (st === 'eligible') document.getElementById('timerSection').className = 'timer-section';
 
   renderTable();
   updateScriptReport();
@@ -529,7 +546,8 @@ function updateScriptReport() {
     var c = getCfg(i);
     var name = s.name || 'Speaker #'+(i+1);
     var line = name + (s.title ? ' — "'+s.title+'"' : '') + ' — ' + fmt(s.recorded);
-    if (s.status === 'over') line += ' (DQ)';
+    if (s.status === 'over') line += ' (Over)';
+    if (s.status === 'dq') line += ' (DQ)';
     if (c.cat === 'manual') manual.push(line);
     else if (c.cat === 'tt') tt.push(line);
     else if (c.cat === 'eval') ev.push(line);
@@ -538,7 +556,7 @@ function updateScriptReport() {
   document.getElementById('scriptTT').innerHTML = tt.length ? tt.join('<br>') : '(none yet)';
   document.getElementById('scriptEval').innerHTML = ev.length ? ev.join('<br>') : '(none yet)';
 
-  var dqList = speakers.filter(function(s){ return s.status === 'over'; });
+  var dqList = speakers.filter(function(s){ return s.status === 'dq'; });
   var el = document.getElementById('scriptEligible');
   if (dqList.length === 0) {
     el.textContent = 'Everyone is eligible for voting.';
@@ -562,9 +580,10 @@ function generateReport() {
     var name = s.name || 'Speaker #'+(i+1);
     var time = s.recorded !== null ? fmt(s.recorded) : '--';
     var badge = s.status === 'eligible' ? '<span class="badge badge-ok">Eligible</span>'
-              : s.status === 'over' ? '<span class="badge badge-dq">DQ</span>'
+              : s.status === 'over' ? '<span class="badge badge-over">Over</span>'
+              : s.status === 'dq' ? '<span class="badge badge-dq">DQ</span>'
               : '<span class="badge badge-wait">Not timed</span>';
-    if (s.status === 'over') dqNames.push(name);
+    if (s.status === 'dq') dqNames.push(name);
     h += '<div class="report-line"><span>'+name+(s.title?' — '+s.title:'')+'</span><span>'+time+' '+badge+'</span></div>';
   }
   el.innerHTML = h || '<p style="color:#555">No speakers timed yet.</p>';
@@ -580,16 +599,17 @@ function generateReport() {
 }
 
 function copyReport() {
-  var lines = ['Timer Report - CYTC #576 (2026/03/04)', ''];
+  var num = document.getElementById('meetingNum').value || '___';
+  var lines = ['Timer Report - CYTC #' + num + ' (' + document.getElementById('meetingDate').textContent + ')', ''];
   for (var i = 0; i < speakers.length; i++) {
     var s = speakers[i];
     if (!s.name && s.recorded === null) continue;
     var name = s.name || 'Speaker #'+(i+1);
     var time = s.recorded !== null ? fmt(s.recorded) : '--';
-    var status = s.status === 'eligible' ? 'Eligible' : s.status === 'over' ? 'DQ' : 'Not timed';
+    var status = s.status === 'eligible' ? 'Eligible' : s.status === 'over' ? 'Over' : s.status === 'dq' ? 'DQ' : 'Not timed';
     lines.push(name + (s.title ? ' — '+s.title : '') + ' | ' + time + ' | ' + status);
   }
-  var dqList = speakers.filter(function(s){ return s.status === 'over'; });
+  var dqList = speakers.filter(function(s){ return s.status === 'dq'; });
   lines.push('');
   if (dqList.length === 0) lines.push('Everyone is eligible for voting.');
   else lines.push('Disqualified: ' + dqList.map(function(s){ return s.name; }).join(', '));
@@ -641,8 +661,19 @@ function updateTimerName() {
   document.getElementById('scriptName').textContent = name;
   document.getElementById('headerTimerName').textContent = 'Timer: ' + name;
 }
+function updateMeetingNum() {
+  document.title = 'Toastmasters Timer - CYTC #' + (document.getElementById('meetingNum').value || '');
+}
+function initDate() {
+  var d = new Date();
+  var y = d.getFullYear();
+  var m = String(d.getMonth() + 1).padStart(2, '0');
+  var day = String(d.getDate()).padStart(2, '0');
+  document.getElementById('meetingDate').textContent = y + '/' + m + '/' + day;
+}
 
 // ===== Boot =====
+initDate();
 initSpeakers();
 </script>
 </body>
