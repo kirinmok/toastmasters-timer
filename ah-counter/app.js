@@ -182,10 +182,6 @@ function setStatus(msg) {
 }
 
 // ===== Copy buttons =====
-document.getElementById("copy-opening").addEventListener("click", () => {
-  const t = document.getElementById("opening-text").textContent;
-  navigator.clipboard.writeText(t).then(() => setStatus("📋 開場詞已複製"));
-});
 document.getElementById("copy-report").addEventListener("click", () => {
   const t = document.getElementById("report-text").textContent;
   navigator.clipboard.writeText(t).then(() => setStatus("📋 報告已複製"));
