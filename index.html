@@ -373,7 +373,21 @@ function initSpeakers() {
     { name: '', type: 'evaluation',   title: '', recorded: null, status: 'pending' },
     { name: '', type: 'evaluation',   title: '', recorded: null, status: 'pending' }
   ];
+  loadAgendaFromStorage();
   renderTable();
+}
+
+// 從 localStorage 載入 Ah Counter OCR 抓的講者名字（兩邊共用議程）
+function loadAgendaFromStorage() {
+  try {
+    var stored = localStorage.getItem('bni_agenda');
+    if (!stored) return;
+    var data = JSON.parse(stored);
+    var names = (data.speakers || []).map(function(s){ return s.speaker; }).filter(Boolean);
+    for (var i = 0; i < names.length && i < speakers.length; i++) {
+      speakers[i].name = names[i];
+    }
+  } catch(e) {}
 }
 
 function fmt(s) { return Math.floor(s/60) + ':' + (s%60<10?'0':'') + s%60; }

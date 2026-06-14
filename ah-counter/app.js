@@ -26,12 +26,30 @@ document.querySelectorAll(".tab").forEach(t => {
 
 // ===== Load Agenda =====
 async function loadAgenda() {
-  const res = await fetch("/api/agenda");
-  const data = await res.json();
-  document.getElementById("meeting-info").textContent =
-    `${data.club || "Toastmasters"} #${data.meeting || "-"} · ${data.date || ""}`;
-  document.getElementById("opening-text").textContent = data.opening_speech || "(no opening script)";
-  renderSpeakers(data.speakers);
+  try {
+    const res = await fetch("/api/agenda");
+    const data = await res.json();
+    document.getElementById("meeting-info").textContent =
+      `${data.club || "Toastmasters"} #${data.meeting || "-"} · ${data.date || ""}`;
+    document.getElementById("opening-text").textContent = data.opening_speech || "(no opening script)";
+    renderSpeakers(data.speakers);
+  } catch (err) {
+    // 線上版無 backend：回退到 localStorage（OCR 上傳後存的議程）
+    const stored = localStorage.getItem('bni_agenda');
+    if (stored) {
+      try {
+        const data = JSON.parse(stored);
+        const dateStr = (data.saved_at || '').slice(0, 10);
+        document.getElementById("meeting-info").textContent = `Local agenda · ${dateStr}`;
+        renderSpeakers(data.speakers || []);
+      } catch (e) {
+        renderSpeakers([]);
+      }
+    } else {
+      document.getElementById("meeting-info").textContent = "拍照載入講者 →";
+      renderSpeakers([]);
+    }
+  }
 }
 
 function renderSpeakers(speakers) {
@@ -188,7 +206,7 @@ document.getElementById("copy-report").addEventListener("click", () => {
 });
 document.getElementById("generate-report").addEventListener("click", generateReport);
 
-// ===== OCR 上傳 =====
+// ===== OCR 上傳 (Tesseract.js 純前端 + localStorage 共用) =====
 document.getElementById("btn-pick-photo").addEventListener("click", () => {
   document.getElementById("agenda-photo").click();
 });
@@ -196,23 +214,44 @@ document.getElementById("btn-pick-photo").addEventListener("click", () => {
 document.getElementById("agenda-photo").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  setStatus("📷 OCR 辨識中…");
-  const fd = new FormData();
-  fd.append("file", file);
+  if (typeof Tesseract === 'undefined') {
+    setStatus("❌ Tesseract.js 未載入，請檢查網路");
+    return;
+  }
+  setStatus("📷 OCR 辨識中（首次載入模型約 5MB，請等一下）…");
   try {
-    const res = await fetch("/api/upload-agenda", {method: "POST", body: fd});
-    const data = await res.json();
-    if (data.error) {
-      setStatus("❌ " + data.error);
-      alert("OCR 失敗: " + data.error);
-      return;
-    }
-    showOcrResult(data);
-    setStatus(`📷 辨識到 ${data.speakers.length} 位講者,請確認`);
+    const { data } = await Tesseract.recognize(file, 'chi_tra+eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          setStatus(`📷 OCR ${Math.round(m.progress * 100)}%`);
+        }
+      }
+    });
+    const rawText = data.text || '';
+    const speakers = parseSpeakers(rawText);
+    showOcrResult({ raw_text: rawText, speakers });
+    setStatus(`📷 辨識到 ${speakers.length} 行候選 — 勾選哪些是要計入的講者`);
   } catch (err) {
-    setStatus("❌ " + err.message);
+    setStatus("❌ OCR 失敗: " + err.message);
+    alert("OCR 失敗: " + err.message);
   }
 });
+
+// 簡單版解析：每行一個候選，過濾數字/時間/極短行；user 在 UI 勾選+編輯
+function parseSpeakers(rawText) {
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  return lines.filter(line => {
+    if (line.length < 2) return false;
+    if (/^\d+$/.test(line)) return false;
+    if (/^\d{1,2}[:：]\d{2}/.test(line)) return false;
+    return true;
+  }).map(line => ({
+    speaker: line,
+    role: 'Speaker',
+    counted: false,
+    start: '',
+  }));
+}
 
 function showOcrResult(data) {
   const wrap = document.getElementById("ocr-result");
@@ -221,12 +260,13 @@ function showOcrResult(data) {
   document.getElementById("ocr-raw").textContent = data.raw_text;
 
   const list = document.getElementById("ocr-speaker-list");
+  const esc = s => String(s || '').replace(/"/g, '&quot;');
   list.innerHTML = data.speakers.map((sp, i) => `
     <div class="ocr-row">
       <input type="checkbox" id="ocr-${i}" ${sp.counted ? "checked" : ""}>
-      <input type="text" id="ocr-name-${i}" value="${sp.speaker || ""}" placeholder="姓名">
-      <input type="text" id="ocr-role-${i}" value="${sp.role || ""}" placeholder="角色">
-      <span class="ocr-time">${sp.start || ""}</span>
+      <input type="text" id="ocr-name-${i}" value="${esc(sp.speaker)}" placeholder="姓名">
+      <input type="text" id="ocr-role-${i}" value="${esc(sp.role)}" placeholder="角色">
+      <span class="ocr-time">${esc(sp.start)}</span>
     </div>
   `).join("");
 }
@@ -236,27 +276,23 @@ document.getElementById("btn-show-raw").addEventListener("click", () => {
   el.style.display = el.style.display === "none" ? "block" : "none";
 });
 
-document.getElementById("btn-commit").addEventListener("click", async () => {
+document.getElementById("btn-commit").addEventListener("click", () => {
   const rows = document.querySelectorAll("#ocr-speaker-list .ocr-row");
   const speakers = Array.from(rows).map((row, i) => ({
     speaker: document.getElementById(`ocr-name-${i}`).value.trim(),
     role: document.getElementById(`ocr-role-${i}`).value.trim() || "Speaker",
     counted: document.getElementById(`ocr-${i}`).checked,
     language: "mixed",
-  })).filter(s => s.speaker);
+  })).filter(s => s.speaker && s.counted);
   if (speakers.length === 0) {
-    alert("沒勾選任何講者");
+    alert("沒勾選任何要計入的講者");
     return;
   }
-  setStatus("⏳ 載入講者…");
-  const res = await fetch("/api/commit-speakers", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({speakers}),
-  });
-  const data = await res.json();
-  setStatus(`✅ 已載入 ${data.loaded} 位講者`);
-  await loadAgenda();
+  // 共用議程：Timer + Ah Counter 讀同一個 localStorage key
+  const agenda = { speakers, saved_at: new Date().toISOString() };
+  localStorage.setItem('bni_agenda', JSON.stringify(agenda));
+  setStatus(`✅ ${speakers.length} 位講者已存（Timer 切過去自動填）`);
+  renderSpeakers(speakers);
   // 切到 Counter tab
   document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
   document.querySelectorAll(".tab-content").forEach(x => x.classList.remove("active"));
