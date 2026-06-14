@@ -264,6 +264,15 @@ document.getElementById("btn-commit").addEventListener("click", async () => {
   document.getElementById("tab-counter").classList.add("active");
 });
 
+// ===== Name input sync (像 Timer 一樣，input 變動 → header + Opening Script 名字同步) =====
+function updateAhCounterName() {
+  const name = document.getElementById('ahCounterName').value.trim();
+  const scriptEl = document.getElementById('ahCounterScriptName');
+  const headerEl = document.getElementById('headerAhCounterName');
+  if (scriptEl) scriptEl.textContent = name || '______';
+  if (headerEl) headerEl.textContent = name ? 'Ah Counter: ' + name : 'Ah Counter:';
+}
+
 // ===== Init =====
 loadAgenda();
 setStatus("Ready");

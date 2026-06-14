@@ -12,6 +12,7 @@
   <div>
     <h1>🎤 Ah Counter</h1>
     <div class="sub" id="meeting-info">Loading…</div>
+    <div class="sub"><span id="headerAhCounterName">Ah Counter:</span></div>
   </div>
   <a href="https://kirinmok.github.io/toastmasters-timer/" style="position:absolute;left:60%;top:50%;transform:translateY(-50%);padding:8px 18px;background:#a78bfa;color:#1a1a1a;font-size:13px;font-weight:700;border-radius:6px;text-decoration:none;">⏱️ Timer →</a>
   <div style="text-align:right;font-size:10px;color:#555;line-height:1.3;">
@@ -32,6 +33,11 @@
   <!-- ===== Tab 1: Opening Script ===== -->
   <div class="tab-content active" id="tab-script">
 
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:0 4px;">
+      <span style="font-size:13px;color:#888;white-space:nowrap;">Ah Counter:</span>
+      <input id="ahCounterName" type="text" value="" placeholder="Your Name" style="flex:1;background:transparent;border:1px solid #333;border-radius:6px;color:#fff;font-size:15px;font-weight:700;padding:8px 10px;font-family:inherit;" oninput="updateAhCounterName()">
+    </div>
+
     <div class="section-card">
       <h2>📷 拍照載入今晚講者</h2>
       <div class="hint">拍 BNI 議程表 → 自動 OCR 抽出講者姓名+講題 → 確認後跳到 Counter tab</div>
@@ -51,7 +57,7 @@
     <div class="section-card">
       <h2>Opening Script (7:01)</h2>
       <div class="hint">Toastmaster 點到你時念這段。</div>
-      <pre id="opening-text" class="script-box">Thank you, Madam Toastmaster. Good evening fellow Toastmasters and welcomed guests. I'm ______, your Ah Counter for tonight. My role is to listen for filler words — uh, um, ah, like, so, you know — and also unnecessary repetitions that sneak in when our brain races ahead of our mouth. But fillers are not mistakes — they are simply our brain catching up with our tongue. I'm not here as a judge. I'm here as a mirror, helping each of you notice the habits you may not hear yourself. I'll share my observations at 8:47. Wishing everyone a night of powerful pauses and minimal fillers. Thank you. Back to you, Madam Toastmaster.</pre>
+      <pre id="opening-text" class="script-box">Thank you, Madam Toastmaster. Good evening fellow Toastmasters and welcomed guests. I'm <span id="ahCounterScriptName">______</span>, your Ah Counter for tonight. My role is to listen for filler words — uh, um, ah, like, so, you know — and also unnecessary repetitions that sneak in when our brain races ahead of our mouth. But fillers are not mistakes — they are simply our brain catching up with our tongue. I'm not here as a judge. I'm here as a mirror, helping each of you notice the habits you may not hear yourself. I'll share my observations at 8:47. Wishing everyone a night of powerful pauses and minimal fillers. Thank you. Back to you, Madam Toastmaster.</pre>
     </div>
 
     <div class="section-card">
