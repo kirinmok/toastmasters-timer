@@ -288,9 +288,22 @@
       <input id="timerName" class="name-input" value="" placeholder="Your Name" style="font-size:15px;font-weight:700;padding:8px 10px;" oninput="updateTimerName()">
     </div>
 
-    <!-- 講者來源說明：Ah Counter OCR = source of truth -->
-    <div style="background:#1a1a1a;border-radius:8px;padding:10px 12px;margin-bottom:14px;border:1px solid #333;font-size:12px;color:#888;line-height:1.5;">
-      📷 今晚講者由 <a href="./ah-counter/" style="color:#a78bfa;font-weight:700;text-decoration:none;">Ah Counter →</a> 端 OCR 決定 — 在那邊拍議程、勾選確認後，Timer 重新整理會自動帶入講者表。
+    <!-- OCR 拍照載入今晚議程（與 Ah Counter 共用同套 parser，兩邊都能拍）-->
+    <div style="background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:14px;border:1px solid #333;">
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px;">📷 OCR 載入今晚議程</div>
+      <div style="font-size:11px;color:#888;margin-bottom:10px;">拍／選議程照片 → 自動辨識（過濾職務角色 + 白名單只留人名）→ 列出要計時的講者。Ah Counter 用同一套 parser，結果共用。</div>
+      <input type="file" id="timerAgendaPhoto" accept="image/*" capture="environment" style="display:none">
+      <button onclick="document.getElementById('timerAgendaPhoto').click()" style="padding:8px 14px;background:#fff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;">📷 選擇 ／ 拍照議程</button>
+      <div id="timerOcrStatus" style="margin-top:8px;font-size:11px;color:#888;"></div>
+      <div id="timerOcrResult" style="margin-top:12px;display:none;">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">辨識到 <span id="timerOcrCount">0</span> 位候選 — 勾選哪些要計時、調 type、可手改名字：</div>
+        <div id="timerOcrList"></div>
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+          <button onclick="commitTimerOcr()" style="padding:8px 14px;background:#a78bfa;color:#1a1a1a;border:none;border-radius:6px;font-weight:700;cursor:pointer;">✅ 確認載入到 Timer 表</button>
+          <button onclick="toggleTimerOcrRaw()" style="padding:8px 14px;background:#333;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;">📄 OCR 原文</button>
+        </div>
+        <pre id="timerOcrRaw" style="display:none;margin-top:10px;background:#111;padding:10px;border-radius:6px;color:#aaa;font-size:11px;overflow:auto;max-height:200px;white-space:pre-wrap;"></pre>
+      </div>
     </div>
 
     <div class="script-box">
@@ -335,6 +348,7 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 // ===== Speech Type Presets =====
 var TYPES = {
@@ -700,6 +714,155 @@ function updateTimerName() {
   var name = document.getElementById('timerName').value.trim();
   document.getElementById('scriptName').textContent = name || '______';
   document.getElementById('headerTimerName').textContent = name ? 'Timer: ' + name : 'Timer:';
+}
+
+// ===== OCR 拍照載入今晚議程（Toastmasters 規範白名單，與 Ah Counter 共用同套 parser）=====
+var TM_ROLE_KEYWORDS = [
+  'toastmaster', 'tm of', 'master of', 'topicsmaster',
+  'timer', 'ah counter', 'ah-counter', 'ahcounter', 'grammarian',
+  'general evaluator', 'gen. evaluator', 'g.e.', 'table topic master',
+  'president', 'vp ', 'vice president', 'sergeant', 'saa', 'door',
+  'invocation', 'word of the day', 'secretary', 'treasurer',
+  'manual speech', 'table topic', 'evaluator', 'evaluation',
+  '主持', '計時', '即興主席', '文法', '總評', '會長', '迎賓', '司儀', '秘書',
+];
+var TM_NOISE_KEYWORDS = [
+  'club', 'meeting', 'theme', 'regular', 'venue', 'address', 'agenda',
+  'schedule', 'role', 'minutes', 'session', 'opening', 'closing',
+  'group photo', 'intermission', 'social', 'check', 'zoom',
+  'bni', 'tainan', 'taiwan', 'district', 'division', 'area', 'since',
+  'http', 'www', '.com', '@',
+  '榮耀', '分會', '保持', '直播', '影片', '個 加',
+];
+var TM_NAME_PATTERNS = [
+  /^[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}$/,
+  /^[A-Z][a-z]{1,15}\s+[A-Z]\.\s*[A-Z][a-z]{1,15}$/,
+  /^[一-龥]{2,4}$/,
+  /^[A-Z][a-z]{1,15}\s+[一-龥]{1,3}$/,
+];
+var TM_TYPE_HINTS = [
+  { re: /5\s*[-–~至到]\s*7|manual.{0,3}speech|prepared.{0,3}speech|speech\s*project/i, type: 'manual_5_7' },
+  { re: /1\s*[-–~至到]\s*2|table\s*topic(?!.{0,5}master)/i, type: 'table_topics' },
+  { re: /2\s*[-–~至到]\s*3|evaluat|個人評論/i, type: 'evaluation' },
+];
+
+function parseToastmastersAgenda(rawText) {
+  var lines = rawText.split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+  var out = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (line.length < 2 || line.length > 40) continue;
+    if (/^[\d:：\s\-–~至到\.,。()(\)|｜+]+$/.test(line)) continue;
+    var lower = line.toLowerCase();
+    var bad = false;
+    for (var j = 0; j < TM_ROLE_KEYWORDS.length; j++) {
+      if (lower.indexOf(TM_ROLE_KEYWORDS[j].toLowerCase()) >= 0) { bad = true; break; }
+    }
+    if (bad) continue;
+    for (var n = 0; n < TM_NOISE_KEYWORDS.length; n++) {
+      if (lower.indexOf(TM_NOISE_KEYWORDS[n].toLowerCase()) >= 0) { bad = true; break; }
+    }
+    if (bad) continue;
+    var isName = false;
+    for (var p = 0; p < TM_NAME_PATTERNS.length; p++) {
+      if (TM_NAME_PATTERNS[p].test(line)) { isName = true; break; }
+    }
+    if (!isName) continue;
+    var ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
+    var type = 'manual_5_7';
+    for (var k = 0; k < TM_TYPE_HINTS.length; k++) {
+      if (TM_TYPE_HINTS[k].re.test(ctx)) { type = TM_TYPE_HINTS[k].type; break; }
+    }
+    out.push({ name: line, type: type, counted: true });
+  }
+  return out;
+}
+
+document.getElementById('timerAgendaPhoto').addEventListener('change', async function(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var statusEl = document.getElementById('timerOcrStatus');
+  if (typeof Tesseract === 'undefined') {
+    statusEl.textContent = '❌ Tesseract.js 未載入，請檢查網路';
+    return;
+  }
+  statusEl.textContent = '📷 OCR 辨識中（首次載入繁中模型約 5MB）…';
+  try {
+    var result = await Tesseract.recognize(file, 'chi_tra+eng', {
+      logger: function(m) {
+        if (m.status === 'recognizing text') {
+          statusEl.textContent = '📷 OCR ' + Math.round(m.progress * 100) + '%';
+        }
+      }
+    });
+    var rawText = result.data.text || '';
+    var candidates = parseToastmastersAgenda(rawText);
+    showTimerOcrResult(rawText, candidates);
+    statusEl.textContent = '📷 過濾後 ' + candidates.length + ' 位候選 — 確認勾選/type 後按「載入到 Timer 表」';
+  } catch (err) {
+    statusEl.textContent = '❌ OCR 失敗: ' + err.message;
+  }
+});
+
+function showTimerOcrResult(rawText, candidates) {
+  document.getElementById('timerOcrResult').style.display = 'block';
+  document.getElementById('timerOcrCount').textContent = candidates.length;
+  document.getElementById('timerOcrRaw').textContent = rawText;
+  var list = document.getElementById('timerOcrList');
+  var esc = function(s) { return String(s || '').replace(/"/g, '&quot;'); };
+  var typeOpts = [
+    ['manual_5_7', 'Manual (5-7m)'],
+    ['table_topics', 'TableTopic (1-2m)'],
+    ['evaluation', 'Evaluation (2-3m)'],
+  ];
+  list.innerHTML = candidates.map(function(c, i) {
+    var opts = typeOpts.map(function(t) {
+      return '<option value="' + t[0] + '"' + (c.type === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
+    }).join('');
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;font-size:12px;">' +
+      '<input type="checkbox" id="tocrChk-' + i + '"' + (c.counted ? ' checked' : '') + '>' +
+      '<input type="text" id="tocrName-' + i + '" value="' + esc(c.name) + '" style="flex:1;background:#111;color:#fff;border:1px solid #333;border-radius:4px;padding:4px 6px;font-size:12px;">' +
+      '<select id="tocrType-' + i + '" style="background:#111;color:#fff;border:1px solid #333;border-radius:4px;padding:4px 6px;font-size:11px;">' + opts + '</select>' +
+      '</div>';
+  }).join('');
+}
+
+function toggleTimerOcrRaw() {
+  var el = document.getElementById('timerOcrRaw');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function commitTimerOcr() {
+  var rows = document.querySelectorAll('#timerOcrList > div');
+  var picked = [];
+  for (var i = 0; i < rows.length; i++) {
+    var chk = document.getElementById('tocrChk-' + i);
+    if (!chk || !chk.checked) continue;
+    var n = document.getElementById('tocrName-' + i).value.trim();
+    if (!n) continue;
+    picked.push({ name: n, type: document.getElementById('tocrType-' + i).value });
+  }
+  if (picked.length === 0) {
+    alert('沒勾選任何要計時的講者');
+    return;
+  }
+  // 完全照 OCR 結果重建 speakers（不再固定 9 格）
+  speakers = picked.map(function(p) {
+    return { name: p.name, type: p.type, title: '', recorded: null, status: 'pending' };
+  });
+  // 寫 localStorage 給 Ah Counter 共用 — role label 跟 loadAgendaFromStorage roleMap 對齊
+  var typeLabel = { 'manual_5_7': 'Manual Speech', 'table_topics': 'Table Topic', 'evaluation': 'Evaluation' };
+  try {
+    var agenda = {
+      speakers: picked.map(function(p) {
+        return { speaker: p.name, role: typeLabel[p.type] || 'Manual Speech', counted: true, language: 'mixed' };
+      }),
+      saved_at: new Date().toISOString(),
+    };
+    localStorage.setItem('bni_agenda', JSON.stringify(agenda));
+  } catch(e) {}
+  renderTable();
+  switchTab('timer');
 }
 
 function updateMeetingNum() {
