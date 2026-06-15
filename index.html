@@ -703,20 +703,38 @@ function updateTimerName() {
   document.getElementById('headerTimerName').textContent = name ? 'Timer: ' + name : 'Timer:';
 }
 
-// ===== OCR 拍照載入今晚議程（Toastmasters 規則自動分辨講者）=====
+// ===== OCR 拍照載入今晚議程（Toastmasters 規範白名單解析）=====
+// Toastmasters 角色（不計時，過濾掉）
 var TM_ROLE_KEYWORDS = [
-  'toastmaster of', 'toastmaster of the', 'tm of', 'master of',
+  'toastmaster', 'tm of', 'master of', 'topicsmaster',
   'timer', 'ah counter', 'ah-counter', 'ahcounter', 'grammarian',
-  'general evaluator', 'gen. evaluator', 'g.e.', 'table topic master', 'tt master',
-  'topicsmaster', 'president', 'vp ', 'vice president',
-  'sergeant', 'door', 'invocation', 'word of the day', 'wot',
-  'meeting theme', 'agenda', 'schedule',
-  '主持', '計時', '即興主席', '即興 主席', '文法', '總評', '會長', '迎賓', '司儀',
+  'general evaluator', 'gen. evaluator', 'g.e.', 'table topic master',
+  'president', 'vp ', 'vice president', 'sergeant', 'saa', 'door',
+  'invocation', 'word of the day', 'secretary', 'treasurer',
+  'manual speech', 'table topic', 'evaluator', 'evaluation',
+  '主持', '計時', '即興主席', '文法', '總評', '會長', '迎賓', '司儀', '秘書',
 ];
+// 會議資訊/雜訊（過濾掉）
+var TM_NOISE_KEYWORDS = [
+  'club', 'meeting', 'theme', 'regular', 'venue', 'address', 'agenda',
+  'schedule', 'role', 'minutes', 'session', 'opening', 'closing',
+  'group photo', 'intermission', 'social', 'check', 'zoom',
+  'bni', 'tainan', 'taiwan', 'district', 'division', 'area', 'since',
+  'http', 'www', '.com', '@',
+  '榮耀', '分會', '保持', '直播', '影片', '個 加',
+];
+// 講者人名白名單格式（必須符合其一才收）
+var TM_NAME_PATTERNS = [
+  /^[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}$/,            // First Last (純英文兩字)
+  /^[A-Z][a-z]{1,15}\s+[A-Z]\.\s*[A-Z][a-z]{1,15}$/,  // First M. Last
+  /^[一-龥]{2,4}$/,                            // 純 2-4 中文字
+  /^[A-Z][a-z]{1,15}\s+[一-龥]{1,3}$/,        // English 中
+];
+// 講者類型（type 推斷）
 var TM_TYPE_HINTS = [
-  { re: /5\s*[-–~至到]\s*7|five.{0,3}seven|manual.{0,3}speech|prepared.{0,3}speech|speech\s*project/i, type: 'manual_5_7' },
-  { re: /1\s*[-–~至到]\s*2|table\s*topic(?!.{0,5}master)|tt(?!.{0,5}master)/i, type: 'table_topics' },
-  { re: /2\s*[-–~至到]\s*3|evaluat|個人評論|個人 評論/i, type: 'evaluation' },
+  { re: /5\s*[-–~至到]\s*7|manual.{0,3}speech|prepared.{0,3}speech|speech\s*project/i, type: 'manual_5_7' },
+  { re: /1\s*[-–~至到]\s*2|table\s*topic(?!.{0,5}master)/i, type: 'table_topics' },
+  { re: /2\s*[-–~至到]\s*3|evaluat|個人評論/i, type: 'evaluation' },
 ];
 
 function parseToastmastersAgenda(rawText) {
@@ -724,25 +742,32 @@ function parseToastmastersAgenda(rawText) {
   var out = [];
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
-    if (line.length < 2) continue;
-    if (/^[\d:：\s\-–~至到\.,。]+$/.test(line)) continue; // 純時間/數字/符號
+    if (line.length < 2 || line.length > 40) continue;
+    if (/^[\d:：\s\-–~至到\.,。()（）|｜+]+$/.test(line)) continue;
     var lower = line.toLowerCase();
-    var isRole = false;
+    // 過濾角色 + 雜訊
+    var bad = false;
     for (var j = 0; j < TM_ROLE_KEYWORDS.length; j++) {
-      if (lower.indexOf(TM_ROLE_KEYWORDS[j].toLowerCase()) >= 0) { isRole = true; break; }
+      if (lower.indexOf(TM_ROLE_KEYWORDS[j].toLowerCase()) >= 0) { bad = true; break; }
     }
-    if (isRole) continue;
-    // 用前後行 + 自身行推類型
+    if (bad) continue;
+    for (var n = 0; n < TM_NOISE_KEYWORDS.length; n++) {
+      if (lower.indexOf(TM_NOISE_KEYWORDS[n].toLowerCase()) >= 0) { bad = true; break; }
+    }
+    if (bad) continue;
+    // 白名單：必須符合人名格式
+    var isName = false;
+    for (var p = 0; p < TM_NAME_PATTERNS.length; p++) {
+      if (TM_NAME_PATTERNS[p].test(line)) { isName = true; break; }
+    }
+    if (!isName) continue;
+    // type 推斷（用前後行 context）
     var ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
     var type = 'manual_5_7';
     for (var k = 0; k < TM_TYPE_HINTS.length; k++) {
       if (TM_TYPE_HINTS[k].re.test(ctx)) { type = TM_TYPE_HINTS[k].type; break; }
     }
-    // 簡單抽 name：去掉前綴「Speaker 1:」「1.」等
-    var nameClean = line.replace(/^(speaker|演講者|講者)\s*\d*[:：]?\s*/i, '')
-                        .replace(/^\d+[\.\、)]\s*/, '')
-                        .trim();
-    out.push({ name: nameClean || line, type: type, counted: true });
+    out.push({ name: line, type: type, counted: true });
   }
   return out;
 }
