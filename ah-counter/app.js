@@ -237,52 +237,77 @@ document.getElementById("agenda-photo").addEventListener("change", async (e) => 
   }
 });
 
-// Toastmasters 規範白名單：只留符合人名格式的行，過濾角色與會議雜訊
+// Toastmasters 議程解析（同 Timer 一套）：從每行抽名字 + 推斷角色 + 預設計時 flag
 function parseSpeakers(rawText) {
-  const TM_ROLES = [
-    'toastmaster', 'tm of', 'master of', 'topicsmaster',
-    'timer', 'ah counter', 'ah-counter', 'ahcounter', 'grammarian',
-    'general evaluator', 'gen. evaluator', 'g.e.', 'table topic master',
-    'president', 'vp ', 'vice president', 'sergeant', 'saa', 'door',
-    'invocation', 'word of the day', 'secretary', 'treasurer',
-    'manual speech', 'table topic', 'evaluator', 'evaluation',
-    '主持', '計時', '即興主席', '文法', '總評', '會長', '迎賓', '司儀', '秘書',
+  const TM_ROLE_MAP = [
+    { kw: /toastmaster\s*of|tm\s*of\s*evening|tm\s*of\s*the/i, role: 'TM of Evening',      timed: true  },
+    { kw: /general\s*evaluator|gen\.?\s*evaluator|g\.?\s*e\.?/i, role: 'General Evaluator', timed: true  },
+    { kw: /grammarian/i,                                        role: 'Grammarian',         timed: true  },
+    { kw: /ah[\s\-]*counter/i,                                  role: 'Ah Counter',         timed: true  },
+    { kw: /(^|\s)timer(\s|:|$)/i,                               role: 'Timer',              timed: true  },
+    { kw: /table\s*topic.{0,5}master|topicsmaster/i,            role: 'Table Topic Master', timed: false },
+    { kw: /manual\s*speech|prepared\s*speech|speaker\s*\d|speech\s*project/i, role: 'Manual Speech', timed: true },
+    { kw: /table\s*topic(?!.{0,5}master)/i,                     role: 'Table Topic',        timed: true  },
+    { kw: /evaluat/i,                                           role: 'Evaluator',          timed: true  },
+    { kw: /president|chair\s*adjourn/i,                         role: 'President',          timed: false },
+    { kw: /(^|\s)vp(\s|\.|:|$)|vice\s*president/i,              role: 'VP',                 timed: false },
+    { kw: /invocation/i,                                        role: 'Invocation',         timed: false },
+    { kw: /sergeant|saa|door/i,                                 role: 'SAA',                timed: false },
   ];
   const TM_NOISE = [
     'club', 'meeting', 'theme', 'regular', 'venue', 'address', 'agenda',
-    'schedule', 'role', 'minutes', 'session', 'opening', 'closing',
-    'group photo', 'intermission', 'social', 'check', 'zoom',
-    'bni', 'tainan', 'taiwan', 'district', 'division', 'area', 'since',
-    'http', 'www', '.com', '@',
-    '榮耀', '分會', '保持', '直播', '影片', '個 加',
+    'schedule', 'minutes', 'session', 'opening', 'closing',
+    'group photo', 'intermission', 'social time', 'zoom',
+    'bni', 'tainan', 'taiwan', 'district', 'division', 'since',
+    'http', 'www', '.com', '榮耀', '分會', '保持',
   ];
-  const TM_NAME_PATTERNS = [
-    /^[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}$/,
-    /^[A-Z][a-z]{1,15}\s+[A-Z]\.\s*[A-Z][a-z]{1,15}$/,
-    /^[一-龥]{2,4}$/,
-    /^[A-Z][a-z]{1,15}\s+[一-龥]{1,3}$/,
-  ];
-  const TYPE_HINTS = [
-    { re: /5\s*[-–~至到]\s*7|manual.{0,3}speech|prepared.{0,3}speech|speech\s*project/i, label: 'Manual Speech' },
-    { re: /1\s*[-–~至到]\s*2|table\s*topic(?!.{0,5}master)/i, label: 'Table Topic' },
-    { re: /2\s*[-–~至到]\s*3|evaluat|個人評論/i, label: 'Evaluation' },
-  ];
+
+  function extractNames(text) {
+    const patterns = [
+      /[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}/g,
+      /[A-Z][a-z]{1,15}\s+[A-Z]\.\s*[A-Z][a-z]{1,15}/g,
+      /[一-龥]{2,4}/g,
+    ];
+    let found = [];
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m) found.push(...m);
+    }
+    return found.filter(n => {
+      const lower = n.toLowerCase();
+      if (TM_NOISE.some(k => lower.includes(k))) return false;
+      if (TM_ROLE_MAP.some(r => r.kw.test(n))) return false;
+      return true;
+    });
+  }
+
+  function detectRole(text) {
+    for (const r of TM_ROLE_MAP) {
+      if (r.kw.test(text)) return r;
+    }
+    return null;
+  }
+
   const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  const seen = {};
   const out = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (line.length < 2 || line.length > 40) continue;
-    if (/^[\d:：\s\-–~至到\.,。()（）|｜+]+$/.test(line)) continue;
-    const lower = line.toLowerCase();
-    if (TM_ROLES.some(k => lower.includes(k.toLowerCase()))) continue;
-    if (TM_NOISE.some(k => lower.includes(k.toLowerCase()))) continue;
-    if (!TM_NAME_PATTERNS.some(re => re.test(line))) continue;
-    const ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
-    let role = 'Speaker';
-    for (const h of TYPE_HINTS) {
-      if (h.re.test(ctx)) { role = h.label; break; }
+    if (line.length < 2 || line.length > 80) continue;
+    const lineRole = detectRole(line);
+    const names = extractNames(line);
+    for (const name of names) {
+      if (seen[name]) continue;
+      seen[name] = true;
+      const ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
+      const role = lineRole || detectRole(ctx);
+      out.push({
+        speaker: name,
+        role: role ? role.role : 'Speaker',
+        counted: role ? role.timed : true,
+        start: '',
+      });
     }
-    out.push({ speaker: line, role, counted: true, start: '' });
   }
   return out;
 }

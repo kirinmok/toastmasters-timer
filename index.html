@@ -409,6 +409,13 @@ function loadAgendaFromStorage() {
       'Manual Speech': 'manual_5_7',
       'Table Topic': 'table_topics',
       'Evaluation': 'evaluation',
+      'Evaluator': 'evaluation',
+      'Grammarian': 'table_topics',
+      'Ah Counter': 'table_topics',
+      'Timer': 'table_topics',
+      'TM of Evening': 'manual_5_7',
+      'General Evaluator': 'manual_5_7',
+      'Speaker': 'manual_5_7',
     };
     // 重建 — Ah Counter 決定幾個人 + 什麼類型，Timer 完全照辦
     speakers = loaded.map(function(s) {
@@ -716,64 +723,86 @@ function updateTimerName() {
   document.getElementById('headerTimerName').textContent = name ? 'Timer: ' + name : 'Timer:';
 }
 
-// ===== OCR 拍照載入今晚議程（Toastmasters 規範白名單，與 Ah Counter 共用同套 parser）=====
-var TM_ROLE_KEYWORDS = [
-  'toastmaster', 'tm of', 'master of', 'topicsmaster',
-  'timer', 'ah counter', 'ah-counter', 'ahcounter', 'grammarian',
-  'general evaluator', 'gen. evaluator', 'g.e.', 'table topic master',
-  'president', 'vp ', 'vice president', 'sergeant', 'saa', 'door',
-  'invocation', 'word of the day', 'secretary', 'treasurer',
-  'manual speech', 'table topic', 'evaluator', 'evaluation',
-  '主持', '計時', '即興主席', '文法', '總評', '會長', '迎賓', '司儀', '秘書',
+// ===== OCR Toastmasters 議程解析（角色→人名抽取，含 Grammarian/Ah Counter 等）=====
+// 角色 → 對應 type + 是否預設計時（Toastmasters 標準 + 多數 club 規矩）
+var TM_ROLE_MAP = [
+  { kw: /toastmaster\s*of|tm\s*of\s*evening|tm\s*of\s*the/i,        role: 'TM of Evening',      type: 'manual_5_7',   timed: true  },
+  { kw: /general\s*evaluator|gen\.?\s*evaluator|g\.?\s*e\.?/i,       role: 'General Evaluator',  type: 'manual_5_7',   timed: true  },
+  { kw: /grammarian/i,                                                role: 'Grammarian',         type: 'table_topics', timed: true  },
+  { kw: /ah[\s\-]*counter/i,                                          role: 'Ah Counter',         type: 'table_topics', timed: true  },
+  { kw: /(^|\s)timer(\s|:|$)/i,                                       role: 'Timer',              type: 'table_topics', timed: true  },
+  { kw: /table\s*topic.{0,5}master|topicsmaster/i,                    role: 'Table Topic Master', type: 'manual_5_7',   timed: false },
+  { kw: /manual\s*speech|prepared\s*speech|speaker\s*\d|speech\s*project/i, role: 'Manual Speech', type: 'manual_5_7',  timed: true  },
+  { kw: /table\s*topic(?!.{0,5}master)/i,                             role: 'Table Topic',        type: 'table_topics', timed: true  },
+  { kw: /evaluat/i,                                                   role: 'Evaluator',          type: 'evaluation',   timed: true  },
+  { kw: /president|chair\s*adjourn/i,                                 role: 'President',          type: 'manual_5_7',   timed: false },
+  { kw: /(^|\s)vp(\s|\.|:|$)|vice\s*president/i,                      role: 'VP',                 type: 'manual_5_7',   timed: false },
+  { kw: /invocation/i,                                                role: 'Invocation',         type: 'manual_5_7',   timed: false },
+  { kw: /sergeant|saa|door/i,                                         role: 'SAA',                type: 'manual_5_7',   timed: false },
 ];
-var TM_NOISE_KEYWORDS = [
+// 純會議資訊雜訊（不是名字也不是角色，過濾）
+var TM_NOISE = [
   'club', 'meeting', 'theme', 'regular', 'venue', 'address', 'agenda',
-  'schedule', 'role', 'minutes', 'session', 'opening', 'closing',
-  'group photo', 'intermission', 'social', 'check', 'zoom',
-  'bni', 'tainan', 'taiwan', 'district', 'division', 'area', 'since',
-  'http', 'www', '.com', '@',
-  '榮耀', '分會', '保持', '直播', '影片', '個 加',
+  'schedule', 'minutes', 'session', 'opening', 'closing',
+  'group photo', 'intermission', 'social time', 'zoom',
+  'bni', 'tainan', 'taiwan', 'district', 'division', 'since',
+  'http', 'www', '.com', '榮耀', '分會', '保持',
 ];
-var TM_NAME_PATTERNS = [
-  /^[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}$/,
-  /^[A-Z][a-z]{1,15}\s+[A-Z]\.\s*[A-Z][a-z]{1,15}$/,
-  /^[一-龥]{2,4}$/,
-  /^[A-Z][a-z]{1,15}\s+[一-龥]{1,3}$/,
-];
-var TM_TYPE_HINTS = [
-  { re: /5\s*[-–~至到]\s*7|manual.{0,3}speech|prepared.{0,3}speech|speech\s*project/i, type: 'manual_5_7' },
-  { re: /1\s*[-–~至到]\s*2|table\s*topic(?!.{0,5}master)/i, type: 'table_topics' },
-  { re: /2\s*[-–~至到]\s*3|evaluat|個人評論/i, type: 'evaluation' },
-];
+
+// 從一行 text 中抽出疑似名字（First Last / First M. Last / 2-4 中文字）
+function extractTMNames(text) {
+  var patterns = [
+    /[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}/g,
+    /[A-Z][a-z]{1,15}\s+[A-Z]\.\s*[A-Z][a-z]{1,15}/g,
+    /[一-龥]{2,4}/g,
+  ];
+  var found = [];
+  for (var i = 0; i < patterns.length; i++) {
+    var m = text.match(patterns[i]);
+    if (m) found.push.apply(found, m);
+  }
+  return found.filter(function(n) {
+    var lower = n.toLowerCase();
+    for (var k = 0; k < TM_NOISE.length; k++) {
+      if (lower.indexOf(TM_NOISE[k]) >= 0) return false;
+    }
+    for (var r = 0; r < TM_ROLE_MAP.length; r++) {
+      if (TM_ROLE_MAP[r].kw.test(n)) return false;
+    }
+    return true;
+  });
+}
+
+// 偵測一段 text 中含什麼 Toastmasters 角色
+function detectTMRole(text) {
+  for (var i = 0; i < TM_ROLE_MAP.length; i++) {
+    if (TM_ROLE_MAP[i].kw.test(text)) return TM_ROLE_MAP[i];
+  }
+  return null;
+}
 
 function parseToastmastersAgenda(rawText) {
   var lines = rawText.split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+  var seen = {};
   var out = [];
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
-    if (line.length < 2 || line.length > 40) continue;
-    if (/^[\d:：\s\-–~至到\.,。()(\)|｜+]+$/.test(line)) continue;
-    var lower = line.toLowerCase();
-    var bad = false;
-    for (var j = 0; j < TM_ROLE_KEYWORDS.length; j++) {
-      if (lower.indexOf(TM_ROLE_KEYWORDS[j].toLowerCase()) >= 0) { bad = true; break; }
+    if (line.length < 2 || line.length > 80) continue;
+    var lineRole = detectTMRole(line);
+    var names = extractTMNames(line);
+    for (var n = 0; n < names.length; n++) {
+      var name = names[n];
+      if (seen[name]) continue;
+      seen[name] = true;
+      var ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
+      var role = lineRole || detectTMRole(ctx);
+      out.push({
+        name: name,
+        type: role ? role.type : 'manual_5_7',
+        roleLabel: role ? role.role : 'Speaker',
+        counted: role ? role.timed : true,
+      });
     }
-    if (bad) continue;
-    for (var n = 0; n < TM_NOISE_KEYWORDS.length; n++) {
-      if (lower.indexOf(TM_NOISE_KEYWORDS[n].toLowerCase()) >= 0) { bad = true; break; }
-    }
-    if (bad) continue;
-    var isName = false;
-    for (var p = 0; p < TM_NAME_PATTERNS.length; p++) {
-      if (TM_NAME_PATTERNS[p].test(line)) { isName = true; break; }
-    }
-    if (!isName) continue;
-    var ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
-    var type = 'manual_5_7';
-    for (var k = 0; k < TM_TYPE_HINTS.length; k++) {
-      if (TM_TYPE_HINTS[k].re.test(ctx)) { type = TM_TYPE_HINTS[k].type; break; }
-    }
-    out.push({ name: line, type: type, counted: true });
   }
   return out;
 }
