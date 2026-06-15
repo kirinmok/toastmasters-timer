@@ -237,20 +237,41 @@ document.getElementById("agenda-photo").addEventListener("change", async (e) => 
   }
 });
 
-// 簡單版解析：每行一個候選，過濾數字/時間/極短行；user 在 UI 勾選+編輯
+// Toastmasters 規則解析：過濾職務角色 + 推斷講者 type
 function parseSpeakers(rawText) {
+  const TM_ROLES = [
+    'toastmaster of', 'toastmaster of the', 'tm of', 'master of',
+    'timer', 'ah counter', 'ah-counter', 'ahcounter', 'grammarian',
+    'general evaluator', 'gen. evaluator', 'g.e.', 'table topic master', 'tt master',
+    'topicsmaster', 'president', 'vp ', 'vice president',
+    'sergeant', 'door', 'invocation', 'word of the day', 'wot',
+    'meeting theme', 'agenda', 'schedule',
+    '主持', '計時', '即興主席', '即興 主席', '文法', '總評', '會長', '迎賓', '司儀',
+  ];
+  const TYPE_HINTS = [
+    { re: /5\s*[-–~至到]\s*7|manual.{0,3}speech|prepared.{0,3}speech|speech\s*project/i, label: 'Manual Speech' },
+    { re: /1\s*[-–~至到]\s*2|table\s*topic(?!.{0,5}master)/i, label: 'Table Topic' },
+    { re: /2\s*[-–~至到]\s*3|evaluat|個人評論/i, label: 'Evaluation' },
+  ];
   const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
-  return lines.filter(line => {
-    if (line.length < 2) return false;
-    if (/^\d+$/.test(line)) return false;
-    if (/^\d{1,2}[:：]\d{2}/.test(line)) return false;
-    return true;
-  }).map(line => ({
-    speaker: line,
-    role: 'Speaker',
-    counted: false,
-    start: '',
-  }));
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.length < 2) continue;
+    if (/^[\d:：\s\-–~至到\.,。]+$/.test(line)) continue;
+    const lower = line.toLowerCase();
+    if (TM_ROLES.some(k => lower.includes(k.toLowerCase()))) continue;
+    const ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
+    let role = 'Speaker';
+    for (const h of TYPE_HINTS) {
+      if (h.re.test(ctx)) { role = h.label; break; }
+    }
+    const nameClean = line.replace(/^(speaker|演講者|講者)\s*\d*[:：]?\s*/i, '')
+                          .replace(/^\d+[\.\、)]\s*/, '')
+                          .trim();
+    out.push({ speaker: nameClean || line, role, counted: true, start: '' });
+  }
+  return out;
 }
 
 function showOcrResult(data) {

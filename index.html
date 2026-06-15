@@ -287,6 +287,25 @@
       <span style="font-size:13px;color:#888;white-space:nowrap;">Timer:</span>
       <input id="timerName" class="name-input" value="" placeholder="Your Name" style="font-size:15px;font-weight:700;padding:8px 10px;" oninput="updateTimerName()">
     </div>
+
+    <!-- OCR 拍照載入今晚議程 -->
+    <div style="background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:14px;border:1px solid #333;">
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px;">📷 OCR 載入今晚議程</div>
+      <div style="font-size:11px;color:#888;margin-bottom:10px;">拍／選議程照片 → Tesseract.js 純前端辨識 → 自動過濾職務角色（Timer／Toastmaster／GE 等）→ 列出要計時的講者</div>
+      <input type="file" id="timerAgendaPhoto" accept="image/*" capture="environment" style="display:none">
+      <button onclick="document.getElementById('timerAgendaPhoto').click()" style="padding:8px 14px;background:#fff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;">📷 選擇 ／ 拍照議程</button>
+      <div id="timerOcrStatus" style="margin-top:8px;font-size:11px;color:#888;"></div>
+      <div id="timerOcrResult" style="margin-top:12px;display:none;">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">辨識到 <span id="timerOcrCount">0</span> 位候選 — 勾選哪些要計時、調 type、可手改名字：</div>
+        <div id="timerOcrList"></div>
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+          <button onclick="commitTimerOcr()" style="padding:8px 14px;background:#a78bfa;color:#1a1a1a;border:none;border-radius:6px;font-weight:700;cursor:pointer;">✅ 確認載入到 Timer 表</button>
+          <button onclick="toggleTimerOcrRaw()" style="padding:8px 14px;background:#333;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;">📄 OCR 原文</button>
+        </div>
+        <pre id="timerOcrRaw" style="display:none;margin-top:10px;background:#111;padding:10px;border-radius:6px;color:#aaa;font-size:11px;overflow:auto;max-height:200px;white-space:pre-wrap;"></pre>
+      </div>
+    </div>
+
     <div class="script-box">
       <h3>Opening Script (19:02)</h3>
       <p>Good evening President, fellow toastmasters and respected guests. My name is <span class="highlight" id="scriptName">______</span>. I am pleased to be the timer of tonight's meeting. To conduct the meeting smoothly and on schedule, I will monitor the time and remind you during prepared speeches, table topics and individual evaluations.</p>
@@ -329,6 +348,7 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 // ===== Speech Type Presets =====
 var TYPES = {
@@ -682,6 +702,137 @@ function updateTimerName() {
   document.getElementById('scriptName').textContent = name || '______';
   document.getElementById('headerTimerName').textContent = name ? 'Timer: ' + name : 'Timer:';
 }
+
+// ===== OCR 拍照載入今晚議程（Toastmasters 規則自動分辨講者）=====
+var TM_ROLE_KEYWORDS = [
+  'toastmaster of', 'toastmaster of the', 'tm of', 'master of',
+  'timer', 'ah counter', 'ah-counter', 'ahcounter', 'grammarian',
+  'general evaluator', 'gen. evaluator', 'g.e.', 'table topic master', 'tt master',
+  'topicsmaster', 'president', 'vp ', 'vice president',
+  'sergeant', 'door', 'invocation', 'word of the day', 'wot',
+  'meeting theme', 'agenda', 'schedule',
+  '主持', '計時', '即興主席', '即興 主席', '文法', '總評', '會長', '迎賓', '司儀',
+];
+var TM_TYPE_HINTS = [
+  { re: /5\s*[-–~至到]\s*7|five.{0,3}seven|manual.{0,3}speech|prepared.{0,3}speech|speech\s*project/i, type: 'manual_5_7' },
+  { re: /1\s*[-–~至到]\s*2|table\s*topic(?!.{0,5}master)|tt(?!.{0,5}master)/i, type: 'table_topics' },
+  { re: /2\s*[-–~至到]\s*3|evaluat|個人評論|個人 評論/i, type: 'evaluation' },
+];
+
+function parseToastmastersAgenda(rawText) {
+  var lines = rawText.split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+  var out = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (line.length < 2) continue;
+    if (/^[\d:：\s\-–~至到\.,。]+$/.test(line)) continue; // 純時間/數字/符號
+    var lower = line.toLowerCase();
+    var isRole = false;
+    for (var j = 0; j < TM_ROLE_KEYWORDS.length; j++) {
+      if (lower.indexOf(TM_ROLE_KEYWORDS[j].toLowerCase()) >= 0) { isRole = true; break; }
+    }
+    if (isRole) continue;
+    // 用前後行 + 自身行推類型
+    var ctx = (i > 0 ? lines[i-1] : '') + ' ' + line + ' ' + (i < lines.length-1 ? lines[i+1] : '');
+    var type = 'manual_5_7';
+    for (var k = 0; k < TM_TYPE_HINTS.length; k++) {
+      if (TM_TYPE_HINTS[k].re.test(ctx)) { type = TM_TYPE_HINTS[k].type; break; }
+    }
+    // 簡單抽 name：去掉前綴「Speaker 1:」「1.」等
+    var nameClean = line.replace(/^(speaker|演講者|講者)\s*\d*[:：]?\s*/i, '')
+                        .replace(/^\d+[\.\、)]\s*/, '')
+                        .trim();
+    out.push({ name: nameClean || line, type: type, counted: true });
+  }
+  return out;
+}
+
+document.getElementById('timerAgendaPhoto').addEventListener('change', async function(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var statusEl = document.getElementById('timerOcrStatus');
+  if (typeof Tesseract === 'undefined') {
+    statusEl.textContent = '❌ Tesseract.js 未載入，請檢查網路';
+    return;
+  }
+  statusEl.textContent = '📷 OCR 辨識中（首次載入繁中模型約 5MB）…';
+  try {
+    var result = await Tesseract.recognize(file, 'chi_tra+eng', {
+      logger: function(m) {
+        if (m.status === 'recognizing text') {
+          statusEl.textContent = '📷 OCR ' + Math.round(m.progress * 100) + '%';
+        }
+      }
+    });
+    var rawText = result.data.text || '';
+    var candidates = parseToastmastersAgenda(rawText);
+    showTimerOcrResult(rawText, candidates);
+    statusEl.textContent = '📷 過濾後 ' + candidates.length + ' 位候選講者 — 確認勾選/type 後按「載入到 Timer 表」';
+  } catch (err) {
+    statusEl.textContent = '❌ OCR 失敗: ' + err.message;
+  }
+});
+
+function showTimerOcrResult(rawText, candidates) {
+  document.getElementById('timerOcrResult').style.display = 'block';
+  document.getElementById('timerOcrCount').textContent = candidates.length;
+  document.getElementById('timerOcrRaw').textContent = rawText;
+  var list = document.getElementById('timerOcrList');
+  var esc = function(s) { return String(s || '').replace(/"/g, '&quot;'); };
+  var typeOpts = [
+    ['manual_5_7', 'Manual (5-7m)'],
+    ['table_topics', 'TableTopic (1-2m)'],
+    ['evaluation', 'Evaluation (2-3m)'],
+  ];
+  list.innerHTML = candidates.map(function(c, i) {
+    var opts = typeOpts.map(function(t) {
+      return '<option value="' + t[0] + '"' + (c.type === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
+    }).join('');
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;font-size:12px;">' +
+      '<input type="checkbox" id="tocrChk-' + i + '"' + (c.counted ? ' checked' : '') + '>' +
+      '<input type="text" id="tocrName-' + i + '" value="' + esc(c.name) + '" style="flex:1;background:#111;color:#fff;border:1px solid #333;border-radius:4px;padding:4px 6px;font-size:12px;">' +
+      '<select id="tocrType-' + i + '" style="background:#111;color:#fff;border:1px solid #333;border-radius:4px;padding:4px 6px;font-size:11px;">' + opts + '</select>' +
+      '</div>';
+  }).join('');
+}
+
+function toggleTimerOcrRaw() {
+  var el = document.getElementById('timerOcrRaw');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function commitTimerOcr() {
+  var rows = document.querySelectorAll('#timerOcrList > div');
+  var picked = [];
+  for (var i = 0; i < rows.length; i++) {
+    var chk = document.getElementById('tocrChk-' + i);
+    if (!chk || !chk.checked) continue;
+    var n = document.getElementById('tocrName-' + i).value.trim();
+    if (!n) continue;
+    picked.push({ name: n, type: document.getElementById('tocrType-' + i).value });
+  }
+  if (picked.length === 0) {
+    alert('沒勾選任何要計時的講者');
+    return;
+  }
+  // 重建 speakers array
+  speakers = picked.map(function(p) {
+    return { name: p.name, type: p.type, title: '', recorded: null, status: 'pending' };
+  });
+  // 同步寫到 localStorage 給 Ah Counter 共用（要計時的人 = 要算 filler 的人）
+  try {
+    var agenda = {
+      speakers: picked.map(function(p) {
+        return { speaker: p.name, role: p.type, counted: true, language: 'mixed' };
+      }),
+      saved_at: new Date().toISOString(),
+    };
+    localStorage.setItem('bni_agenda', JSON.stringify(agenda));
+  } catch(e) {}
+  renderTable();
+  switchTab('timer');
+}
+
 function updateMeetingNum() {
   document.title = 'Toastmasters Timer - CYTC #' + (document.getElementById('meetingNum').value || '');
 }
